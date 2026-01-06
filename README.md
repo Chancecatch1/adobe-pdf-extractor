@@ -29,9 +29,6 @@ pip install pdfservices-sdk pypdf
 1. Go to [Adobe Developer Console](https://developer.adobe.com/console)
 2. Sign in with Adobe ID (free to create)
 3. Click **"Create new project"**
-4. Click **"Add to Project"** → **"API"**
-5. Select **"PDF Services API"** → **"Next"**
-6. Select **"OAuth Server-to-Server"** → **"Save"**
 
 ### Step 2: Download Credentials
 
@@ -45,8 +42,6 @@ project-folder/
 ├── pdftojson-XXXXX-Production.json  <-- credentials file here
 └── ...
 ```
-
-> **Note**: This file contains your API secrets. It's in `.gitignore` and won't be uploaded to GitHub.
 
 ## Usage
 
@@ -88,18 +83,7 @@ For scanned PDFs over 100 pages, the tool automatically:
 
 ```
 Total pages: 350
-Splitting into 4 parts (100 pages each)...
-
-[1/4] Processing pages 1-100...
-[2/4] Processing pages 101-200...
-...
-
-Done! Created 4 output(s):
-  - filename_part1_p1-100.txt
-  - filename_part2_p101-200.txt
-  - filename_part3_p201-300.txt
-  - filename_part4_p301-350.txt
-```
+Splitting into 4 parts (100 pages each)
 
 ## API Pricing
 
