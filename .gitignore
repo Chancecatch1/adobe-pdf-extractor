@@ -1,0 +1,13 @@
+# Adobe API Credentials
+pdftojson*.json
+
+# Python
+__pycache__/
+
+# Output folders
+*_extracted/
+*_images/
+*_tables/
+
+# macOS
+.DS_Store
