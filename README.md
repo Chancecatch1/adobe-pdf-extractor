@@ -84,6 +84,7 @@ For scanned PDFs over 100 pages, the tool automatically:
 ```
 Total pages: 350
 Splitting into 4 parts (100 pages each)
+```
 
 ## API Pricing
 
