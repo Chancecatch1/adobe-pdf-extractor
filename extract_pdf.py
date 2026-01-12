@@ -5,6 +5,7 @@ import zipfile
 import shutil
 from pypdf import PdfReader, PdfWriter
 from adobe.pdfservices.operation.auth.service_principal_credentials import ServicePrincipalCredentials
+from adobe.pdfservices.operation.config.client_config import ClientConfig
 from adobe.pdfservices.operation.pdf_services import PDFServices
 from adobe.pdfservices.operation.pdf_services_media_type import PDFServicesMediaType
 from adobe.pdfservices.operation.pdfjobs.jobs.extract_pdf_job import ExtractPDFJob
@@ -19,7 +20,7 @@ PAGES_PER_BATCH = 100  # Adobe API limit for scanned PDFs
 
 
 def get_extract_params(option: int) -> ExtractPDFParams:
-    """Return ExtractPDFParams based on selected option"""
+    """Return ExtractPDFParams based on selected option (1, 2, or 3 only)"""
     
     if option == 1:  # Text only
         return ExtractPDFParams(
@@ -38,23 +39,8 @@ def get_extract_params(option: int) -> ExtractPDFParams:
             table_structure_type=TableStructureType.CSV
         )
     
-    elif option == 4:  # All
-        return ExtractPDFParams(
-            elements_to_extract=[
-                ExtractElementType.TEXT,
-                ExtractElementType.TABLES
-            ],
-            elements_to_extract_renditions=[
-                ExtractRenditionsElementType.TABLES,
-                ExtractRenditionsElementType.FIGURES
-            ],
-            table_structure_type=TableStructureType.CSV,
-            add_char_info=True,
-            styling_info=True
-        )
-    
     else:
-        raise ValueError("Invalid option")
+        raise ValueError("Invalid option. Use 1, 2, or 3.")
 
 
 def extract_text_from_json(json_path: str) -> str:
@@ -86,15 +72,15 @@ def process_zip_output(zip_path: str, output_dir: str, option: int, base_name: s
             json_path = os.path.join(temp_dir, "structuredData.json")
             if os.path.exists(json_path):
                 text = extract_text_from_json(json_path)
-                txt_path = os.path.join(output_dir, f"{base_name}.txt")
+                txt_path = os.path.join(output_dir, "text.txt")
                 with open(txt_path, "w", encoding="utf-8") as f:
                     f.write(text)
                 created_files.append(txt_path)
         
-        elif option == 2:  # Images only -> figures folder
+        elif option == 2:  # Images only -> images folder
             figures_src = os.path.join(temp_dir, "figures")
             if os.path.exists(figures_src):
-                figures_dst = os.path.join(output_dir, f"{base_name}_images")
+                figures_dst = os.path.join(output_dir, "images")
                 if os.path.exists(figures_dst):
                     shutil.rmtree(figures_dst)
                 shutil.copytree(figures_src, figures_dst)
@@ -103,27 +89,13 @@ def process_zip_output(zip_path: str, output_dir: str, option: int, base_name: s
         elif option == 3:  # Tables only -> tables folder
             tables_src = os.path.join(temp_dir, "tables")
             if os.path.exists(tables_src):
-                tables_dst = os.path.join(output_dir, f"{base_name}_tables")
+                tables_dst = os.path.join(output_dir, "tables")
                 if os.path.exists(tables_dst):
                     shutil.rmtree(tables_dst)
                 shutil.copytree(tables_src, tables_dst)
                 created_files.append(tables_dst)
         
-        elif option == 4:  # All -> folder with everything
-            all_dst = os.path.join(output_dir, f"{base_name}_extracted")
-            if os.path.exists(all_dst):
-                shutil.rmtree(all_dst)
-            shutil.copytree(temp_dir, all_dst)
-            
-            # Also create a .txt file for convenience
-            json_path = os.path.join(temp_dir, "structuredData.json")
-            if os.path.exists(json_path):
-                text = extract_text_from_json(json_path)
-                txt_path = os.path.join(all_dst, f"{base_name}.txt")
-                with open(txt_path, "w", encoding="utf-8") as f:
-                    f.write(text)
-            
-            created_files.append(all_dst)
+        # Option 4 is handled separately in main() by running 1, 2, 3 sequentially
         
         # Clean up temp directory
         shutil.rmtree(temp_dir)
@@ -199,7 +171,7 @@ def main():
     print("  1. Text only       -> .txt file")
     print("  2. Images only     -> images folder")
     print("  3. Tables only     -> CSV files")
-    print("  4. All             -> folder with everything")
+    print("  4. All (1+2+3)     -> text + images + tables")
     print("-"*50)
     
     # Get user choice
@@ -225,7 +197,13 @@ def main():
         client_secret=oauth_creds["client_secrets"][0]
     )
     
-    pdf_services = PDFServices(credentials=credentials)
+    # Configure timeout: connect=10s, read=120s (default is 10s which is too short)
+    client_config = ClientConfig(
+        connect_timeout=10000,  # 10 seconds
+        read_timeout=120000     # 120 seconds (2 minutes)
+    )
+    
+    pdf_services = PDFServices(credentials=credentials, client_config=client_config)
     
     # Check page count
     reader = PdfReader(pdf_path)
@@ -240,16 +218,47 @@ def main():
     
     if total_pages <= PAGES_PER_BATCH:
         # Single file processing
-        zip_path = os.path.join(pdf_dir, f"{pdf_basename}_temp.zip")
+        # Create output folder
+        output_folder = os.path.join(pdf_dir, f"{pdf_basename}")
+        os.makedirs(output_folder, exist_ok=True)
         
-        print(f"Uploading PDF...")
-        print(f"Extracting content...")
+        if option == 4:
+            # Option 4: Run options 1, 2, 3 sequentially
+            option_names = {1: "Text", 2: "Images", 3: "Tables"}
+            import time
+            
+            for sub_option in [1, 2, 3]:
+                zip_path = os.path.join(pdf_dir, f"{pdf_basename}_temp.zip")
+                
+                print(f"\n[{sub_option}/3] Extracting {option_names[sub_option]}...")
+                print(f"  Uploading PDF...")
+                print(f"  Extracting content...")
+                
+                try:
+                    extract_single_pdf(pdf_services, pdf_path, zip_path, sub_option)
+                    print(f"  Processing output...")
+                    process_zip_output(zip_path, output_folder, sub_option, pdf_basename)
+                except Exception as e:
+                    print(f"  Warning: {option_names[sub_option]} extraction failed - {e}")
+                    if os.path.exists(zip_path):
+                        os.remove(zip_path)
+                
+                # Delay between API calls to avoid rate limiting
+                if sub_option < 3:
+                    time.sleep(2)
+        else:
+            # Single option (1, 2, or 3)
+            zip_path = os.path.join(pdf_dir, f"{pdf_basename}_temp.zip")
+            
+            print(f"Uploading PDF...")
+            print(f"Extracting content...")
+            
+            extract_single_pdf(pdf_services, pdf_path, zip_path, option)
+            
+            print(f"Processing output...")
+            process_zip_output(zip_path, output_folder, option, pdf_basename)
         
-        extract_single_pdf(pdf_services, pdf_path, zip_path, option)
-        
-        print(f"Processing output...")
-        created_files = process_zip_output(zip_path, pdf_dir, option, pdf_basename)
-        all_created_files.extend(created_files)
+        all_created_files.append(output_folder)
     
     else:
         # Split and process in batches
@@ -258,32 +267,47 @@ def main():
         
         temp_files = split_pdf(pdf_path, PAGES_PER_BATCH)
         
+        # Create main output folder
+        output_folder = os.path.join(pdf_dir, f"{pdf_basename}")
+        os.makedirs(output_folder, exist_ok=True)
+        
+        # Determine which options to run
+        options_to_run = [1, 2, 3] if option == 4 else [option]
+        option_names = {1: "Text", 2: "Images", 3: "Tables"}
+        
         for i, temp_pdf in enumerate(temp_files):
             start_page = i * PAGES_PER_BATCH + 1
             end_page = min((i + 1) * PAGES_PER_BATCH, total_pages)
             
-            part_name = f"{pdf_basename}_part{i+1}_p{start_page}-{end_page}"
-            zip_path = os.path.join(pdf_dir, f"{part_name}_temp.zip")
+            # Create subfolder for this part
+            part_name = f"part{i+1}_p{start_page}-{end_page}"
+            part_folder = os.path.join(output_folder, part_name)
+            os.makedirs(part_folder, exist_ok=True)
             
             print(f"\n[{i+1}/{num_batches}] Processing pages {start_page}-{end_page}...")
-            print(f"  Uploading...")
-            print(f"  Extracting...")
             
-            try:
-                extract_single_pdf(pdf_services, temp_pdf, zip_path, option)
+            for sub_option in options_to_run:
+                zip_path = os.path.join(pdf_dir, f"{pdf_basename}_temp.zip")
                 
-                print(f"  Processing output...")
-                created_files = process_zip_output(zip_path, pdf_dir, option, part_name)
-                all_created_files.extend(created_files)
+                if option == 4:
+                    print(f"  [{sub_option}/3] Extracting {option_names[sub_option]}...")
+                else:
+                    print(f"  Extracting...")
                 
-            except Exception as e:
-                print(f"  Error: {e}")
-                if os.path.exists(zip_path):
-                    os.remove(zip_path)
+                try:
+                    extract_single_pdf(pdf_services, temp_pdf, zip_path, sub_option)
+                    process_zip_output(zip_path, part_folder, sub_option, part_name)
+                    
+                except Exception as e:
+                    print(f"  Error: {e}")
+                    if os.path.exists(zip_path):
+                        os.remove(zip_path)
             
             # Clean up temp PDF
             if temp_pdf != pdf_path:
                 os.unlink(temp_pdf)
+        
+        all_created_files.append(output_folder)
     
     # Print summary
     print(f"\n" + "="*50)

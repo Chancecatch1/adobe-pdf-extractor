@@ -1,5 +1,10 @@
+.env
+__pycache__/
+*.pyc
+node_modules/
+
 # Documents
-Documents/
+docs/
 
 # Adobe API Credentials
 pdftojson*.json
